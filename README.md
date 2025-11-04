@@ -1,23 +1,28 @@
 # Virginia Migrant Children — Data Analysis (R)
 
-A professional, reproducible R analysis of **unaccompanied child sponsor placements in Virginia (2015–2023)** with choropleth maps and summary charts. Built for a public portfolio, with safe handling of API keys.
-
 > Repository: `virginia-migrant-children-analysis`
+
+## Preview
+
+![Top counties by rate](outputs/vizA_Fawson.png)
+![Top counties by total placements](outputs/vizA2_Fawson.png)
+![Monthly trend](outputs/vizB_Fawson.png)
+![County choropleth](outputs/choropleth_Fawson_v3_labeled.png)
 
 ---
 
-## ✨ What’s inside
+## What’s inside
 - Clean R Markdown analysis (`.Rmd`) that produces:
   - **Top counties by rate** (per 10,000 residents)
   - **Top counties by total placements**
   - **Monthly trend line (2015–2023)**
   - **County-level choropleth** (ACS polygons + rates)
-- Safe **API key** workflow using `.Renviron` + `CENSUS-setup.R` (no secrets in code)
+- Safe **API key** workflow using `.Renviron` + `CENSUS-setup.R`
 - Sensible `.gitignore` for R projects
 
 ---
 
-## 📁 Project structure
+## Project structure
 ```
 virginia-migrant-children-analysis/
 ├─ README.md
@@ -33,7 +38,7 @@ virginia-migrant-children-analysis/
 
 ---
 
-## 🔧 Setup
+## Setup
 
 ### 1) R packages
 Install once:
@@ -61,14 +66,14 @@ source("CENSUS-setup.R")
 
 ---
 
-## ▶️ How to run
+## How to run
 1. Place raw input files in `data/` (see **Data sources** below).
 2. Open the `.Rmd` in RStudio (or VS Code with the R extension).
 3. Knit to **HTML**. Charts will be saved to the working directory (or `outputs/` if you set it).
 
 ---
 
-## 📊 Data sources
+## Data sources
 - **migrantchildren.csv (2015–2023)** — ORR unaccompanied child sponsor releases (compiled by the NYT).
 - **zips_crosswalk.xlsx (2022)** — ZIP → county crosswalk to assign placements to VA counties.
 - **mc_w_pop.csv (optional)** — ZIP-level population for early rate checks.
@@ -78,25 +83,14 @@ source("CENSUS-setup.R")
 
 ---
 
-## 🔒 Security & reproducibility
+## Security & reproducibility
 - **No secrets in code** (API keys loaded from environment).
 - `.gitignore` excludes `.Renviron`, `.env`, R session files, and build artifacts.
 - Paths are **relative** (e.g., `data/...`) for easy reproduction.
 
 ---
 
-## 🚀 Optional: Publish a live page (GitHub Pages)
-- Commit the knitted HTML to the repo (e.g., `index.html` or place it in `/docs`).
-- GitHub → **Settings → Pages** → Source: `main` branch (root or `/docs` folder).
-
----
-
-## 📄 License
-Choose a license (e.g., MIT) if you want others to reuse your code. Add a file named `LICENSE`.
-
----
-
-## 🙌 Acknowledgments
+## Acknowledgments
 - U.S. HHS/ORR releases (via NYT compilation) for placement data.
 - ACS via **tidycensus** for county polygons and population.
 - Project by **Amelie Fawson**.
