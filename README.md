@@ -2,6 +2,18 @@
 
 > Repository: `virginia-migrant-children-analysis`
 
+## About this Project  
+This data-led analysis maps and measures where unaccompanied minors were placed in Virginia (2015-2023). Using federal release data, ZIP-to-county crosswalks and ACS population estimates, it shows where the biggest numbers landed and where the impact is highest relative to population. It's designed for journalists and policy-makers curious about local shifts and statewide trends.
+
+## Key Findings  
+- Small rural counties and independent cities rank highest in **placements per 10,000 residents**, not just raw counts.  
+- Northern Virginia counties (Fairfax, Loudoun, Prince William) receive the **largest total number of placements**, showing a geography of scale.  
+- Monthly trends reveal sustained elevated placement rates over multiple years, indicating this is more than a short-term spike.  
+
+## Contact  
+[LinkedIn](https://www.linkedin.com/in/amelie-fawson/)  
+
+
 ## Preview
 
 ![Top counties by rate](outputs/vizA_Fawson.png)
