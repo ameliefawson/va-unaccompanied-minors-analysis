@@ -1,0 +1,36 @@
+# R project
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# Secrets
+.Renviron
+.env
+.env.*
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*_cache/
+cache/
+
+# R session + secrets
+.Rhistory
+.RData
+.Rproj.user/
+.Renviron
+.env
+CENSUS-setup.R
+
+# OS clutter
+.DS_Store
+Thumbs.db
+
+# R Markdown output
+*.html
+*.pdf
+*.png
+

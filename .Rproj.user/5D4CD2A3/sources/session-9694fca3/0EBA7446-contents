@@ -1,0 +1,359 @@
+---
+title: "virginia-migrant-children-analysis"
+author: "Amelie Fawson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Setup
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(tidyr)
+library(lubridate)  
+library(readxl)      
+library(janitor)
+library(scales)
+library(tidycensus)
+library(sf)
+#install.packages("ggrepel")
+library(ggrepel)
+
+source("CENSUS-setup.R")
+Sys.getenv("CENSUS_API_KEY")
+
+# ---- Load data ----
+nyt_mc     <- read_csv("migrantchildren.csv") %>% clean_names()
+mc_pop     <- read_csv("mc_w_pop.csv") %>% clean_names()
+zips_cross <- read_excel("zips_crosswalk.xlsx") %>% clean_names()
+
+# ---- Virginia working table, with parsed dates ----
+nyt_mc_va <- nyt_mc %>%
+  left_join(zips_cross, by = c("sponsor_zipcode" = "zip")) %>%
+  filter(state == "Virginia") %>%
+  mutate(date = as.Date(childs_date_of_release, format = "%m/%d/%y"))
+
+# ---- ACS county population (better denominators ----
+va_acs_pop <- get_acs(
+  geography = "county", state = "VA", variables = "B01003_001",
+  year = 2022, survey = "acs5", cache_table = TRUE
+) %>%
+  clean_names() %>%
+  rename(population = estimate) %>%
+  mutate(
+    county_name_acs  = str_remove(name, ", Virginia"),
+    county_clean_acs = county_name_acs |> str_remove("\\s*County$") |> stringr::str_to_lower()
+  ) %>%
+  select(geoid, county_clean_acs, population)
+
+# ---- ZIP -> ONE county (prevents multi-county duplication) ----
+zips_va_unique <- zips_cross %>%
+  filter(state == "Virginia") %>%
+  arrange(zip, county) %>%                 # deterministic tie-break
+  group_by(zip) %>% slice(1) %>% ungroup() %>%
+  transmute(
+    zip = as.character(zip),
+    county_clean = county |> str_remove("\\s*County$") |> stringr::str_to_lower()
+  )
+
+# ---- Count placements per ZIP (all years), then roll up to county via the one-to-one ZIP->county ----
+va_county_counts <- nyt_mc %>%
+  clean_names() %>%
+  count(sponsor_zipcode, name = "placements_zip") %>%
+  rename(zip = sponsor_zipcode) %>%
+  mutate(zip = as.character(zip)) %>%
+  inner_join(zips_va_unique, by = "zip") %>%
+  group_by(county_clean) %>%
+  summarise(placements = sum(placements_zip), .groups = "drop")
+
+# ---- Join ACS denominators and compute rate per 10k ----
+va_rates_acs <- va_county_counts %>%
+  inner_join(va_acs_pop, by = c("county_clean" = "county_clean_acs")) %>%
+  mutate(rate_per_10k = (placements / population) * 10000)
+
+# Top 10s we’ll use for A and A2
+va_top10_rate_acs   <- va_rates_acs %>% filter(placements >= 20) %>% arrange(desc(rate_per_10k)) %>% slice_head(n = 10)
+va_top10_counts_acs <- va_rates_acs %>% arrange(desc(placements)) %>% slice_head(n = 10)
+
+# ---- Brand color ----
+brand_blue <- "#79a1d8"
+```
+
+------------------------------------------------------------------------
+
+# Visuals for Draft Pitch
+
+This document holds two charts that support my **draft story pitch**: - **Chart A:** Group comparison (e.g., top ZIPs/counties or sponsor_type categories) - **Chart B:** Change over time (monthly)
+
+------------------------------------------------------------------------
+
+## Chart A — Group comparison (bar)
+
+**Goal:** Compare values across groups (e.g., top 10 ZIP codes or counties).
+
+**NOTE:** I included a companion chart to show both per-capita rates and total placements. The rate chart shows the rural counties where small numbers have big proportional impacts and the count chart shows where the largest numbers of children actually settled. I think that having both charts helps avoid small-sample distortion and gives readers / the audience a fuller picture of Virginia’s unaccompanied children placement patterns.
+
+```{r chartA, eval=TRUE}
+pA <- ggplot(
+  va_top10_rate_acs,
+  aes(x = reorder(county_clean, rate_per_10k), y = rate_per_10k)
+) +
+  geom_col(fill = brand_blue) +
+  coord_flip() +
+  labs(
+    title    = "Virginia Counties With the Highest Rate of Unaccompanied Child Placements",
+    subtitle = "Top 10 by placements per 10,000 residents (ACS county denominators), 2015–2023",
+    x = NULL,
+    y = "Placements per 10,000 residents",
+    caption = "Source: U.S. HHS/ORR (via NYT release); ACS 5-year B01003_001. Analysis by Amelie Fawson.\nNote: ZIPs assigned to a single county to prevent multi-county duplication; counties with <20 placements excluded."
+  ) +
+  scale_x_discrete(labels = stringr::str_to_title) +
+  scale_y_continuous(labels = comma_format()) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title    = element_text(size = 13, face = "bold", margin = margin(b = 6)),
+    plot.subtitle = element_text(size = 11, margin = margin(b = 12)),
+    axis.text.y   = element_text(size = 10, margin = margin(r = 5)),
+    plot.margin   = margin(10, 20, 10, 10)
+  )
+
+pA
+ggsave("vizA_Fawson.png", pA, width = 8.5, height = 5.2, dpi = 350, bg = "white")
+```
+
+**Takeaway (1-2 sentences):** Small jurisdictions (often independent cities) post the highest per-capita placement rates, indicating concentrated impact despite lower overall counts.\
+
+## Chart A2 — Companion Chart: Total Placements by County
+
+```{r chartA2, eval=TRUE}
+pA2 <- ggplot(
+  va_top10_counts_acs,
+  aes(x = reorder(county_clean, placements), y = placements)
+) +
+  geom_col(fill = brand_blue) +
+  coord_flip() +
+  labs(
+    title    = "Virginia Counties With the Most Unaccompanied Child Placements",
+    subtitle = "Top 10 by total placements, 2015–2023",
+    x = NULL,
+    y = "Total placements (count)",
+    caption = "Source: U.S. HHS/ORR (via NYT release). Analysis by Amelie Fawson.\nNote: Placements reflect releases, not unique children."
+  ) +
+  scale_x_discrete(labels = stringr::str_to_title) +
+  scale_y_continuous(labels = comma_format(), breaks = pretty_breaks(6), expand = expansion(mult = c(0.02, 0.05))) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title    = element_text(size = 13, face = "bold", margin = margin(b = 6)),
+    plot.subtitle = element_text(size = 11, margin = margin(b = 12)),
+    axis.text.y   = element_text(size = 10, margin = margin(r = 5)),
+    plot.margin   = margin(10, 20, 10, 10)
+  )
+
+pA2
+ggsave("vizA2_Fawson.png", pA2, width = 8.5, height = 5.2, dpi = 350, bg = "white")
+```
+
+**Takeaway (1–2 sentences):** Fairfax, Loudoun and Prince William account for the largest numbers of placements, showing Northern Virginia shoulders much of the statewide influx.
+
+------------------------------------------------------------------------
+
+## Chart B — Change over time, monthly (line)
+
+**Goal:** Show monthly change (counts).
+
+```{r chartB_monthly, eval=TRUE}
+mc_va_monthly <- nyt_mc_va %>%
+  filter(!is.na(date)) %>%
+  mutate(month = floor_date(date, "month")) %>%
+  count(month, name = "placements") %>%
+  complete(month = seq.Date(min(month), max(month), by = "month"),
+           fill = list(placements = 0))
+
+pB <- ggplot(mc_va_monthly, aes(x = month, y = placements)) +
+  geom_line(linewidth = 0.9, color = brand_blue) +
+  labs(
+    title    = "Sponsor Placements of Unaccompanied Children in Virginia Over Time",
+    subtitle = "Monthly totals, 2015–2023",
+    x = NULL,
+    y = "Sponsor placements (monthly count)",
+    caption = "Source: U.S. HHS/ORR (via NYT release). Analysis by Amelie Fawson.\nNote: Placements reflect releases, not unique children; missing months filled with zeros."
+  ) +
+  scale_y_continuous(labels = comma_format(), breaks = pretty_breaks(6), expand = expansion(mult = c(0.02, 0.06))) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title    = element_text(size = 13, face = "bold", margin = margin(b = 6)),
+    plot.subtitle = element_text(size = 11, margin = margin(b = 12)),
+    axis.title.y  = element_text(size = 12, face = "bold", margin = margin(r = 8)),
+    axis.text.y   = element_text(size = 10),
+    plot.margin   = margin(10, 20, 10, 10)
+  )
+
+pB
+ggsave("vizB_Fawson.png", pB, width = 10, height = 6, dpi = 300, bg = "white")
+```
+
+**Takeaway (1–2 sentences):** Monthly placements spike in specific periods and remain elevated across multiple years, signaling sustained pressure on schools and services.
+
+------------------------------------------------------------------------
+
+## Choropleth
+
+```{r Choropleth, eval=TRUE}
+# 1) Placements by county (Virginia only)
+va_place_county <- nyt_mc %>%
+  clean_names() %>%
+  left_join(zips_cross, by = c("sponsor_zipcode" = "zip")) %>%
+  filter(state == "Virginia") %>%
+  mutate(
+    county_clean = county |>
+      str_remove("\\s*County$") |>
+      str_to_lower()
+  ) %>%
+  count(county_clean, name = "placements")
+
+# 2) ACS population + county polygons (VA) — with name normalized once
+va_acs_geo <- get_acs(
+  geography = "county", state = "VA",
+  variables = "B01003_001", year = 2022, survey = "acs5",
+  geometry = TRUE, cache_table = TRUE
+) %>%
+  clean_names() %>%
+  mutate(
+    population   = estimate,
+    county_clean = str_remove(name, ", Virginia") |>
+                   str_remove("\\s*County$") |>
+                   str_to_lower()
+  ) %>%
+  select(geoid, county_clean, population, geometry)
+
+# 3) Join + rate
+va_map_df <- va_acs_geo %>%
+  left_join(va_place_county, by = "county_clean") %>%
+  mutate(
+    placements   = replace_na(placements, 0),
+    rate_per_10k = (placements / population) * 10000
+  )
+
+# 4) Map (continuous ramp)
+va_border <- sf::st_as_sf(
+  data.frame(geometry = sf::st_union(va_map_df)),
+  crs = sf::st_crs(va_map_df)
+)
+
+p_map2 <- ggplot(va_map_df) +
+  geom_sf(aes(fill = rate_per_10k), color = "white", linewidth = 0.06) + 
+  geom_sf(data = va_border, fill = NA, color = "white", linewidth = 0.05) + 
+  coord_sf(expand = FALSE) +
+  scale_fill_viridis_c(
+    option = "C",
+    na.value = "grey90",
+    labels  = scales::label_number(accuracy = 1),
+    name    = "Placements of Unaccompanied\nChildren per 10,000 Residents"
+  ) +
+  labs(
+    title    = "Where Virginia Counties See the Highest Per-Capita Placement Rates",
+    subtitle = "Unaccompanied child sponsor placements per 10,000 residents, 2015–2023",
+    caption  = "Source: U.S. HHS/ORR (via NYT release); ACS 5-year (B01003_001). Analysis by Amelie Fawson.
+Note: ZIPs were assigned to a single county to avoid multi-county duplication; counties with <20 placements may be undercounted. NA areas represent missing population data."
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title    = element_text(face = "bold", size = 13, margin = margin(b = 6)),
+    plot.subtitle = element_text(size = 11, margin = margin(b = 10)),
+    legend.position = "right",
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(10, 20, 10, 10)
+  )
+
+p_map2
+ggsave("choropleth_Fawson_v2.png", p_map2, width = 14 , height = 5.5, dpi = 350, bg = "white")
+
+# pick top 5 by rate_per_10k
+va_top5_labels <- va_map_df %>%
+  dplyr::slice_max(order_by = rate_per_10k, n = 5, with_ties = FALSE) %>%
+  dplyr::mutate(
+    # robust points even for multipart polygons
+    pts = sf::st_point_on_surface(geometry),
+    county_label = stringr::str_to_title(county_clean),
+    label_text = paste0(county_label, "\n", scales::comma(round(rate_per_10k, 0)), " per 10k")
+  ) %>%
+  
+  # pull X/Y for ggrepel
+  dplyr::bind_cols(as.data.frame(sf::st_coordinates(.$pts))) %>%
+  dplyr::rename(x = X, y = Y)
+
+p_map3 <- p_map2 +
+  geom_label_repel(
+    data = va_top5_labels,
+    aes(x = x, y = y, label = label_text),
+    seed = 123,
+    size = 3,
+    label.size = 0.2,
+    box.padding = 0.4,
+    point.padding = 0.2,
+    min.segment.length = 0,
+    segment.size = 0.3,
+    segment.color = "gray30",
+    fill = "white", alpha = 0.9
+  ) +
+  labs(x = NULL, y = NULL)
+
+p_map3
+ggsave("choropleth_Fawson_v3_labeled.png", p_map3, width = 14, height = 5.5, dpi = 350, bg = "white")
+
+```
+
+**Takeaway (1-2 sentences):** Per-capita placement rates are highest in several independent cities and smaller counties, indicating that some communities face outsized impacts relative to their population despite lower overall counts.
+
+**Methods note:** I used `tidycensus::get_acs(..., geometry = TRUE)` to obtain county populations (B01003_001) and polygons for Virginia in a single step, then joined the Virginia placements-by-county table and calculated placements per 10,000 residents.
+
+------------------------------------------------------------------------
+
+## Appendix
+
+```{r appendix_tables, eval=TRUE}
+va_top10_rate_acs
+va_top10_counts_acs
+va_rates_acs
+va_place_county
+va_county_counts
+mc_va_monthly
+zips_va_unique
+zips_cross
+```
+
+## Methods and Reproducibility
+
+**Files used:**
+
+migrantchildren.csv (2015–2023) — Federal Office of Refugee Resettlement release published by The New York Times, containing one record per unaccompanied child placement with variables for child’s date of release, sponsor ZIP code, gender and country of origin.
+
+zips_crosswalk.xlsx (2022) — A ZIP-to-county crosswalk used to link each sponsor ZIP code to a Virginia county.
+
+mc_w_pop.csv (2022 ACS 5-year)\* — supplemental population estimates by ZIP (ZCTA) used for early rate checks.
+
+ACS 5-year B01003_001 (2022) — Total population by county, downloaded directly through tidycensus with geometry = TRUE to obtain polygon shapes for mapping.
+
+**Geographic unit:** county. ZIPs were converted to a single county per ZIP code to avoid multi-county duplication; rates were calculated as **placements ÷ population × 10,000.**
+
+**Key joins:**
+
+1.  *migrantchildren.csv* + *zips_crosswalk.xlsx* → assign sponsor ZIPs to counties
+2.  Result + ACS county population → attach denominators and geometry
+
+**Files required to reproduce:**
+
+-   570-final-pitch-Fawson.Rmd (main analysis)
+-   migrantchildren.csv, zips_crosswalk.xlsx, mc_w_pop.csv (raw data)
+-   Internet connection for tidycensus::get_acs()
+
+To reproduce all charts, open the Rmd, install the listed packages, and knit to HTML.\
+Output includes: vizA_Fawson.png, vizA2_Fawson.png, vizB_Fawson.png, choropleth_Fawson_v3_labeled.png and choropleth_Fawson_labeled.png
+
+```{r sessioninfo, eval=TRUE}
+sessionInfo()
+```
